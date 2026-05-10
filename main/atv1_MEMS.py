@@ -16,7 +16,7 @@ condicao_inicial = [0.02, 0.0, 0.01, 0.0, 0.0] # Condição inicial: [x(0), x'(0
 l0 = [0.08, 0.12] # m (8 cm e 12 cm)
 h = [0.01, 0.005, 0.001, 0.0005]  # s
 
-def derivadas(estado, t_atual, l0):
+def derivadas(estado, t_atual, l0, R=2.0, w=2.0):
     x1,x2,x3,x4,x5 = estado
     def l1(x,y):
         return np.sqrt((x + a)**2 + y**2)
@@ -38,7 +38,7 @@ def derivadas(estado, t_atual, l0):
     dx5dt = ((alpha * x4 - R * x5) / L)
     return np.array([dx1dt, dx2dt, dx3dt, dx4dt, dx5dt])
 
-def euler(passo, t_simul, condicao_inicial, l0=l0[0]):
+def euler(passo, t_simul, condicao_inicial, l0=l0[0], R=2.0, w=2.0):
     n_passos = int(t_simul / passo)
     t = np.linspace(0, t_simul, n_passos)
     resultados = np.zeros((n_passos, 5))
@@ -50,7 +50,7 @@ def euler(passo, t_simul, condicao_inicial, l0=l0[0]):
     resultados[0] = condicao_inicial
 
     for i in range(0, n_passos - 1):
-        f = derivadas(resultados[i], t[i], l0)
+        f = derivadas(resultados[i], t[i], l0, R, w)
 
         proximo_estado = resultados[i] + passo * f
 
@@ -70,7 +70,7 @@ def euler(passo, t_simul, condicao_inicial, l0=l0[0]):
         resultados[i+1] = proximo_estado
     return t, resultados, ax, ay, didt
 
-def RK4(passo, t_simul, condicao_inicial, l0=l0[0]):
+def RK4(passo, t_simul, condicao_inicial, l0=l0[0], R=2.0, w=2.0):
     n_passos = int(t_simul / passo)
     t = np.linspace(0, t_simul, n_passos)
     resultados = np.zeros((n_passos, 5))
@@ -82,11 +82,11 @@ def RK4(passo, t_simul, condicao_inicial, l0=l0[0]):
     resultados[0] = condicao_inicial
 
     for i in range(0, n_passos - 1):
-        K1 = derivadas(resultados[i], t[i], l0)
-        K2 = derivadas(resultados[i] + passo * K1 / 2, t[i] + passo / 2, l0)
-        K3 = derivadas(resultados[i] + passo * K2 / 2, t[i] + passo / 2, l0)
-        K4 = derivadas(resultados[i] + passo * K3, t[i] + passo, l0)
-        
+        K1 = derivadas(resultados[i], t[i], l0, R, w)
+        K2 = derivadas(resultados[i] + passo * K1 / 2, t[i] + passo / 2, l0, R, w)
+        K3 = derivadas(resultados[i] + passo * K2 / 2, t[i] + passo / 2, l0, R, w)
+        K4 = derivadas(resultados[i] + passo * K3, t[i] + passo, l0, R, w)
+
         f_media = (K1 + 2*K2 + 2*K3 + K4) / 6
         proximo_estado = resultados[i] + passo * f_media
        
@@ -426,7 +426,7 @@ def atv1_1():
     for val_l0 in l0:
         for passo in h:
             # --- MÉTODO DE EULER ---
-            t_euler, resultados_euler, ax_euler, ay_euler, didt_euler = euler(passo, 20, condicao_inicial, l0=val_l0)
+            t_euler, resultados_euler, ax_euler, ay_euler, didt_euler = euler(passo, 20, condicao_inicial, l0=val_l0, R=R, w=w)
             x_acel_euler = ax_euler
             y_acel_euler = ay_euler
             corrente_euler = resultados_euler[:, 4]
@@ -449,7 +449,7 @@ def atv1_1():
             dados_completos_euler[val_l0]["e"].append(energia_total_trap_euler)
 
             # --- MÉTODO DE RK4 ---
-            t_rk4, resultados_rk4, ax_rk4, ay_rk4, didt_rk4 = RK4(passo, 20, condicao_inicial, l0=val_l0)
+            t_rk4, resultados_rk4, ax_rk4, ay_rk4, didt_rk4 = RK4(passo, 20, condicao_inicial, l0=val_l0, R=R, w=w)
             x_acel_rk4 = ax_rk4
             y_acel_rk4 = ay_rk4
             corrente_rk4 = resultados_rk4[:, 4]
@@ -488,8 +488,192 @@ def atv1_1():
     
     salvar_grafico_32_subplots(dados_completos_euler, dados_completos_rk4, h, l0, "Comparação Completa Euler vs RK4", prefixo="Comparacao")
 
+def atv1_2():
+    # --- Otimização de R ---
+    resistencias = np.linspace(0.01, 5, 120)
+    energias_coletadas_r = []
+
+    for R_atual in resistencias:
+        print(f"Simulando para R = {R_atual:.4f} Ohms...")
+        t, res, ax, ay, didt = RK4(passo=0.001, t_simul=20, condicao_inicial=condicao_inicial, l0=0.12, R=R_atual, w=w)
+        corrente = res[:, 4]
+        potencia = R_atual * (corrente**2)
+        energia = np.trapz(potencia, x=t)
+        print(f"  Energia coletada: {energia:.6f} J")
+        energias_coletadas_r.append(energia)
+    
+    # --- Plotagem R vs Energia ---
+    plt.figure(figsize=(10, 6))
+    plt.plot(resistencias, energias_coletadas_r, 'b-', linewidth=2)
+    plt.xlabel('Resistência $R$ [$\Omega$]')
+    plt.ylabel('Energia Total Coletada [J]')
+    plt.title('Otimização da Resistência de Carga')
+    plt.grid(True, alpha=0.3)
+
+    # Encontra o índice onde a energia é máxima
+    idx_max = np.argmax(energias_coletadas_r)
+
+    # Pega o valor de R e a energia correspondente
+    R_otimo = resistencias[idx_max]
+    E_maxima = energias_coletadas_r[idx_max]
+
+    print(f"O valor de R que maximiza a energia é: {R_otimo:.4f} Ohms")
+    print(f"Energia máxima coletada: {E_maxima:.6f} J")
+
+    # Marcar o ponto no gráfico
+    plt.scatter(R_otimo, E_maxima, color='red', s=80, zorder=5)
+    plt.annotate(f'Máximo:\n$R = {R_otimo:.2f} \Omega$\n$E = {E_maxima:.6f} J$',
+             xy=(R_otimo, E_maxima), 
+             xytext=(R_otimo + 0.5, E_maxima * 0.9), 
+             arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=8),
+             fontsize=10, fontweight='bold',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    plt.legend()
+
+    # Verifica se a pasta existe; se não, cria automaticamente
+    diretorio_saida = "resultados"
+    if not os.path.exists(diretorio_saida):
+        os.makedirs(diretorio_saida)
+        print(f"Pasta '{diretorio_saida}' criada com sucesso!")
+
+    # Nome do arquivo (substitui se já existir)
+    nome_arquivo = f"Otimizacao_Resistencia.png"
+    caminho_completo = os.path.join(diretorio_saida, nome_arquivo)
+
+    # Salva com alta qualidade e sem margens extras
+    plt.savefig(caminho_completo, dpi=600, bbox_inches='tight')
+    print(f"Figura salva em: {caminho_completo}")
+    plt.close() # Fecha a figura 
+
+    #################################################################
+    # --- Otimização de W ---
+    frequencias = np.linspace(0.01, 40, 120)
+    energias_coletadas_w = []
+
+    for w_atual in frequencias:
+        print(f"Simulando para w = {w_atual:.4f} rads/s...")
+        t, res, ax, ay, didt = RK4(passo=0.001, t_simul=20, condicao_inicial=condicao_inicial, l0=0.12, R=R_otimo, w=w_atual)
+        corrente = res[:, 4]
+        potencia = R_otimo * (corrente**2)
+        energia = np.trapz(potencia, x=t)
+        print(f"  Energia coletada: {energia:.6f} J")
+        
+        energias_coletadas_w.append(energia)
+
+    # --- Plotagem W vs Energia ---
+    plt.figure(figsize=(10, 6))
+    plt.plot(frequencias, energias_coletadas_w, 'g-', linewidth=2)
+    plt.xlabel('Frequência $\\omega$ [rad/s]')
+    plt.ylabel('Energia Total Coletada [J]')
+    plt.title('Otimização da Frequência de Operação')
+    plt.grid(True, alpha=0.3)
+
+    # Encontra o índice onde a energia é máxima
+    idx_max = np.argmax(energias_coletadas_w)
+
+    # Pega o valor de w e a energia correspondente
+    w_otimo = frequencias[idx_max]
+    E_maxima = energias_coletadas_w[idx_max]
+
+    print(f"O valor de w que maximiza a energia é: {w_otimo:.4f} rad/s")
+    print(f"Energia máxima coletada: {E_maxima:.6f} J")
+
+    # Marcar o ponto no gráfico
+    plt.scatter(w_otimo, E_maxima, color='red', s=80, zorder=5)
+    plt.annotate(f'Máximo:\n$\\omega = {w_otimo:.2f} \\frac{{rad}}{{s}}$\n$E = {E_maxima:.6f} J$',
+             xy=(w_otimo, E_maxima), 
+             xytext=(w_otimo + 0.5, E_maxima * 0.9),
+             arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=8),
+             fontsize=10, fontweight='bold',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    plt.legend()
+
+    # Verifica se a pasta existe; se não, cria automaticamente
+    diretorio_saida = "resultados"
+    if not os.path.exists(diretorio_saida):
+        os.makedirs(diretorio_saida)
+        print(f"Pasta '{diretorio_saida}' criada com sucesso!")
+
+    # Nome do arquivo (substitui se já existir)
+    nome_arquivo = f"Otimizacao_Frequencia.png"
+    caminho_completo = os.path.join(diretorio_saida, nome_arquivo)
+
+    # Salva com alta qualidade e sem margens extras
+    plt.savefig(caminho_completo, dpi=600, bbox_inches='tight')
+    print(f"Figura salva em: {caminho_completo}")
+    plt.close() # Fecha a figura 
+
+    #################################################################
+    # --- Otimização de conjunta R e W ---
+    vec_R = np.linspace(0.01, 20, 120)
+    vec_W = np.linspace(0.01, 40, 120)
+
+    # Cria as matrizes 2D
+    R_mesh, W_mesh = np.meshgrid(vec_R, vec_W)
+    Energia_mesh = np.zeros((120, 120))
+
+    for i in range(120):
+        for j in range(120):
+            print(f"Progresso {i+1}/120: {100*(j+1)/120:.1f}%")
+            R_at = R_mesh[i, j]
+            W_at = W_mesh[i, j]
+            
+            # Simulação
+            t, res, _, _, _ = RK4(passo=0.001, t_simul=20, condicao_inicial=condicao_inicial, 
+                                l0=0.12, R=R_at, w=W_at)
+            
+            # Cálculo da energia
+            corrente = res[:, 4]
+            potencia = R_at * (corrente**2)
+            Energia_mesh[i, j] = np.trapz(potencia, x=t)
+        print(f"Progresso: {100*(i+1)/120:.1f}%")
+    
+    plt.figure(figsize=(10, 8))
+
+    # Preenchimento das cores (Curvas de Nível)
+    cp = plt.contourf(R_mesh, W_mesh, Energia_mesh, levels=20, cmap='viridis')
+    plt.colorbar(cp, label='Energia Total [J]')
+
+    # Linhas de contorno para destacar a forma
+    plt.contour(R_mesh, W_mesh, Energia_mesh, levels=10, colors='black', alpha=0.3)
+
+    # Localizando o Máximo Global
+    idx_max = np.unravel_index(np.argmax(Energia_mesh), Energia_mesh.shape)
+    R_best = R_mesh[idx_max]
+    W_best = W_mesh[idx_max]
+    E_best = Energia_mesh[idx_max]
+
+    # Marcando o ponto ótimo
+    plt.scatter(R_best, W_best, color='red', marker='x', s=100, label='Máximo Global')
+    plt.annotate(f'Ótimo:\n$R={R_best:.2f}\Omega$\n$\omega={W_best:.2f} rad/s$', 
+                xy=(R_best, W_best), xytext=(R_best+0.5, W_best+2),
+                arrowprops=dict(arrowstyle='->', color='white'), color='white', fontweight='bold')
+
+    plt.xlabel('Resistência $R$ [$\Omega$]')
+    plt.ylabel('Frequência $\omega$ [rad/s]')
+    plt.title('Mapa de Colheita de Energia: $R$ vs $\omega$')
+    plt.legend()
+
+    # Verifica se a pasta existe; se não, cria automaticamente
+    diretorio_saida = "resultados"
+    if not os.path.exists(diretorio_saida):
+        os.makedirs(diretorio_saida)
+        print(f"Pasta '{diretorio_saida}' criada com sucesso!")
+
+    # Nome do arquivo (substitui se já existir)
+    nome_arquivo = f"Mapa_Otimizacao_Conjunta.png"
+    caminho_completo = os.path.join(diretorio_saida, nome_arquivo)
+
+    # Salva com alta qualidade e sem margens extras
+    plt.savefig(caminho_completo, dpi=600, bbox_inches='tight')
+    print(f"Figura salva em: {caminho_completo}")
+
+    plt.close() # Fecha a figura 
+
+
 def main():
-    atv1_1()
+    #atv1_1()
+    atv1_2()
 
 if __name__ == "__main__":
     main()
