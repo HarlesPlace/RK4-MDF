@@ -52,9 +52,11 @@ def euler(passo, t_simul, condicao_inicial, l0=l0[0]):
     for i in range(0, n_passos - 1):
         f = derivadas(resultados[i], t[i], l0)
 
+        proximo_estado = resultados[i] + passo * f
+
         # --- TRAVA DE SEGURANÇA ---
         # Se qualquer derivada ou valor de estado ficar absurdo, paramos tudo
-        if np.any(np.abs(f) > 1e100) or np.any(np.abs(resultados[i]) > 1e100):
+        if np.any(np.abs(f) > 1e100) or np.any(np.abs(proximo_estado) > 1e100):
             # Preenche o ponto atual e todo o resto com NaN para não quebrar o gráfico
             ax[i:] = np.nan
             ay[i:] = np.nan
@@ -65,7 +67,43 @@ def euler(passo, t_simul, condicao_inicial, l0=l0[0]):
         ax[i] = f[1]   # aceleração em x
         ay[i] = f[3]   # aceleração em y
         didt[i] = f[4] # variação da corrente
-        resultados[i+1] = resultados[i] + passo * f
+        resultados[i+1] = proximo_estado
+    return t, resultados, ax, ay, didt
+
+def RK4(passo, t_simul, condicao_inicial, l0=l0[0]):
+    n_passos = int(t_simul / passo)
+    t = np.linspace(0, t_simul, n_passos)
+    resultados = np.zeros((n_passos, 5))
+    ax = np.zeros(n_passos)
+    ay = np.zeros(n_passos)
+    didt = np.zeros(n_passos)
+
+    # Condição inicial
+    resultados[0] = condicao_inicial
+
+    for i in range(0, n_passos - 1):
+        K1 = derivadas(resultados[i], t[i], l0)
+        K2 = derivadas(resultados[i] + passo * K1 / 2, t[i] + passo / 2, l0)
+        K3 = derivadas(resultados[i] + passo * K2 / 2, t[i] + passo / 2, l0)
+        K4 = derivadas(resultados[i] + passo * K3, t[i] + passo, l0)
+        
+        f_media = (K1 + 2*K2 + 2*K3 + K4) / 6
+        proximo_estado = resultados[i] + passo * f_media
+       
+        # --- TRAVA DE SEGURANÇA ---
+        # Se qualquer derivada ou valor de estado ficar absurdo, paramos tudo
+        if np.any(np.abs(f_media) > 1e100) or np.any(np.abs(proximo_estado) > 1e100):
+            # Preenche o ponto atual e todo o resto com NaN para não quebrar o gráfico
+            ax[i:] = np.nan
+            ay[i:] = np.nan
+            didt[i:] = np.nan
+            resultados[i+1:] = np.nan
+            break # Sai do loop imediatamente
+
+        ax[i] = f_media[1]   # aceleração em x
+        ay[i] = f_media[3]   # aceleração em y
+        didt[i] = f_media[4] # variação da corrente
+        resultados[i+1] = proximo_estado
     return t, resultados, ax, ay, didt
 
 def salvar_grafico_8_subplots(t_lista, dados_lista, accel_x_lista, 
@@ -252,37 +290,70 @@ def salvar_grafico_16_subplots(dados_completos, h_lista,
 #####################################################################################
 def main():
     dados_completos_euler = {l: {"t": [], "res": [], "ax": [], "ay": [], "p": [], "e": []} for l in l0}
+    dados_completos_rk4 = {l: {"t": [], "res": [], "ax": [], "ay": [], "p": [], "e": []} for l in l0}
 
     for val_l0 in l0:
         for passo in h:
-            t, resultados, ax, ay, didt = euler(passo, 20, condicao_inicial, l0=val_l0)
-            x_pos = resultados[:, 0]
-            x_vel = resultados[:, 1]
-            x_acel = ax
-            y_pos = resultados[:, 2]
-            y_vel = resultados[:, 3]
-            y_acel = ay
-            corrente = resultados[:, 4]
-            potencia = R * (corrente**2)
-            energia_total = np.sum(potencia) * passo
+            # --- MÉTODO DE EULER ---
+            t_euler, resultados_euler, ax_euler, ay_euler, didt_euler = euler(passo, 20, condicao_inicial, l0=val_l0)
+            x_acel_euler = ax_euler
+            y_acel_euler = ay_euler
+            corrente_euler = resultados_euler[:, 4]
+            potencia_euler = R * (corrente_euler**2)
+            energia_total_euler = np.sum(potencia_euler) * passo
             # Regra do Trapézio (um pouco mais precisa que a soma simples)
-            energia_total_trap = np.trapz(potencia, dx=passo)
+            energia_total_trap_euler = np.trapz(potencia_euler, dx=passo)
 
             # Gerar imagem INDIVIDUAL (1 L0, 1 h)
-            salvar_grafico_8_subplots([t], [resultados], [x_acel], [y_acel], [potencia], [energia_total_trap], [passo], val_l0, f"Passo único h={passo}", prefixo="Euler")
+            salvar_grafico_8_subplots([t_euler], [resultados_euler], [x_acel_euler], [y_acel_euler],
+                                      [potencia_euler], [energia_total_trap_euler], [passo], val_l0, 
+                                      f"Passo único h={passo}", prefixo="Euler")
 
             # Guardar para as composições
-            dados_completos_euler[val_l0]["t"].append(t)
-            dados_completos_euler[val_l0]["res"].append(resultados)
-            dados_completos_euler[val_l0]["ax"].append(x_acel)
-            dados_completos_euler[val_l0]["ay"].append(y_acel)
-            dados_completos_euler[val_l0]["p"].append(potencia)
-            dados_completos_euler[val_l0]["e"].append(energia_total_trap)
+            dados_completos_euler[val_l0]["t"].append(t_euler)
+            dados_completos_euler[val_l0]["res"].append(resultados_euler)
+            dados_completos_euler[val_l0]["ax"].append(x_acel_euler)
+            dados_completos_euler[val_l0]["ay"].append(y_acel_euler)
+            dados_completos_euler[val_l0]["p"].append(potencia_euler)
+            dados_completos_euler[val_l0]["e"].append(energia_total_trap_euler)
+
+            # --- MÉTODO DE RK4 ---
+            t_rk4, resultados_rk4, ax_rk4, ay_rk4, didt_rk4 = RK4(passo, 20, condicao_inicial, l0=val_l0)
+            x_acel_rk4 = ax_rk4
+            y_acel_rk4 = ay_rk4
+            corrente_rk4 = resultados_rk4[:, 4]
+            potencia_rk4 = R * (corrente_rk4**2)
+            energia_total_rk4 = np.sum(potencia_rk4) * passo
+            # Regra do Trapézio (um pouco mais precisa que a soma simples)
+            energia_total_trap_rk4 = np.trapz(potencia_rk4, dx=passo)
+
+            # Gerar imagem INDIVIDUAL (1 L0, 1 h)
+            salvar_grafico_8_subplots([t_rk4], [resultados_rk4], [x_acel_rk4], [y_acel_rk4],
+                                      [potencia_rk4], [energia_total_trap_rk4], [passo], val_l0, 
+                                      f"Passo único h={passo}", prefixo="RK4")
+
+            # Guardar para as composições
+            dados_completos_rk4[val_l0]["t"].append(t_rk4)
+            dados_completos_rk4[val_l0]["res"].append(resultados_rk4)
+            dados_completos_rk4[val_l0]["ax"].append(x_acel_rk4)
+            dados_completos_rk4[val_l0]["ay"].append(y_acel_rk4)
+            dados_completos_rk4[val_l0]["p"].append(potencia_rk4)
+            dados_completos_rk4[val_l0]["e"].append(energia_total_trap_rk4)
 
         # Gerar imagem de CONVERGÊNCIA (1 L0, 4 passos h juntos)
-        d = dados_completos_euler[val_l0]
-        salvar_grafico_8_subplots(d["t"], d["res"], d["ax"], d["ay"], d["p"], d["e"], h, val_l0, "Convergência de h")
+        # --- EULER ---
+        d_euler = dados_completos_euler[val_l0]
+        salvar_grafico_8_subplots(d_euler["t"], d_euler["res"], d_euler["ax"], d_euler["ay"], 
+                                  d_euler["p"], d_euler["e"], h, val_l0, "Convergência de h", prefixo="Euler")
+        # --- RK4 ---
+        d_rk4 = dados_completos_rk4[val_l0]
+        salvar_grafico_8_subplots(d_rk4["t"], d_rk4["res"], d_rk4["ax"], d_rk4["ay"], 
+                                  d_rk4["p"], d_rk4["e"], h, val_l0, "Convergência de h", prefixo="RK4")
+        
+    # --- EULER ---
     salvar_grafico_16_subplots(dados_completos_euler, h, l0, "Múltiplas Configurações L0", prefixo="Euler")
+    # --- RK4 ---
+    salvar_grafico_16_subplots(dados_completos_rk4, h, l0, "Múltiplas Configurações L0", prefixo="RK4")
 
 if __name__ == "__main__":
     main()
