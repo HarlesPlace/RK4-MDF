@@ -287,8 +287,139 @@ def salvar_grafico_16_subplots(dados_completos, h_lista,
 
     plt.close(fig) # Fecha a figura 
 
-#####################################################################################
-def main():
+def salvar_grafico_32_subplots(dados_completos_euler, dados_completos_rk4, h_lista, l0_val, sufixo_nome, prefixo="Euler"):
+
+    # --- Preparação do Plot ---
+    fig, axs = plt.subplots(8, 4, figsize=(30, 24), sharex=True)
+    fig.suptitle(
+        "Simulação de Coletor de Energia MEMS Biestável\n"
+        "Comparação entre Euler e RK4",
+        fontsize=18,
+        fontweight='bold',
+        y=0.995
+    )
+    plt.subplots_adjust( hspace=0.5,
+                        wspace=0.25)
+    colunas = [
+        ("Euler", l0_val[0]),
+        ("Euler", l0_val[1]),
+        ("RK4",   l0_val[0]),
+        ("RK4",   l0_val[1]),
+    ]
+
+    titulos = [
+        f"Euler\n$l_0$ = {l0_val[0]}m",
+        f"Euler\n$l_0$ = {l0_val[1]}m",
+        f"RK4\n$l_0$ = {l0_val[0]}m",
+        f"RK4\n$l_0$ = {l0_val[1]}m",
+    ]
+
+    fig.text(0.25, 0.965, "Método de Euler",
+         ha='center',
+         fontsize=16,
+         fontweight='bold')
+
+    fig.text(0.75, 0.965, "Método de RK4",
+         ha='center',
+         fontsize=16,
+         fontweight='bold')
+    
+    # Nomes para os labels dos subplots
+    labels = ['$y(t) [m]$', '$\dot{y}(t) [m/s]$', '$\ddot{y}(t) [m/s^2]$', 
+            '$x(t) [m]$', '$\dot{x}(t) [m/s]$', '$\ddot{x}(t) [m/s^2]$', 
+            '$I(t) [A]$', '$P(t) [W]$']
+    
+    for col, (metodo, val_l0_atual) in enumerate(colunas):
+        # Escolhe qual dicionário usar
+        if metodo == "Euler":
+            d_l0 = dados_completos_euler[val_l0_atual]
+        else:
+            d_l0 = dados_completos_rk4[val_l0_atual]
+
+        # Título da coluna
+        axs[0, col].set_title(
+            titulos[col],
+            fontsize=13,
+            pad=20,
+            fontweight='semibold'
+        )
+
+        for i, h in enumerate(h_lista):
+
+            t = d_l0["t"][i]
+            res = d_l0["res"][i]
+            e_atual = d_l0["e"][i]
+
+            if np.isnan(e_atual) or np.isinf(e_atual):
+                legenda_energia = f'h={h} (E=$\\infty$)'
+            else:
+                legenda_energia = f'h={h} (E={e_atual:.4f} J)'
+
+            axs[0, col].plot(t, res[:,2], label=f'h={h}')
+            axs[1, col].plot(t, res[:,3])
+            axs[2, col].plot(t, d_l0["ay"][i])
+            axs[3, col].plot(t, res[:,0])
+            axs[4, col].plot(t, res[:,1])
+            axs[5, col].plot(t, d_l0["ax"][i])
+            axs[6, col].plot(t, res[:,4])
+            axs[7, col].plot(t, d_l0["p"][i], label=legenda_energia)
+
+        axs[0, col].legend(loc='upper right', fontsize=8)
+        axs[7, col].legend(loc='upper right', fontsize=8)
+
+        axs[7, col].set_xlabel('Tempo (s)')
+
+    # --- Ajustes de Eixo e Escala ---
+    idx_melhor = -1
+    for i in range(8):
+        for j in range(4):
+            if j==0:
+                axs[i, 0].set_ylabel(labels[i])
+            axs[i, j].grid(True, alpha=0.3)
+            axs[i, j].set_xlim(0, 20)
+
+            # Fixar escala baseada no melhor resultado (se ele não for NaN)
+            # Pegamos os dados do melhor passo para definir os limites
+            melhor_resultado_da_linha = []
+            metodo, l0_atual = colunas[j]
+            if metodo == "Euler":
+                d_l0 = dados_completos_euler[l0_atual]
+            else:
+                d_l0 = dados_completos_rk4[l0_atual]
+            if i == 0: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,2]   # y
+            elif i == 1: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,3] # vy
+            elif i == 2: melhor_resultado_da_linha = d_l0["ay"][idx_melhor]      # ay
+            elif i == 3: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,0] # x
+            elif i == 4: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,1] # vx
+            elif i == 5: melhor_resultado_da_linha = d_l0["ax"][idx_melhor]       # ax
+            elif i == 6: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,4] # I
+            elif i == 7: melhor_resultado_da_linha = d_l0["p"][idx_melhor]        # P
+
+            # se não for uma lista só de NaNs fixamos a escala
+            if np.any(np.isfinite(melhor_resultado_da_linha)):
+                y_min = np.nanmin(melhor_resultado_da_linha)
+                y_max = np.nanmax(melhor_resultado_da_linha)
+                # margem de 10% para não colar na borda
+                margem = (y_max - y_min) * 0.1 if y_max != y_min else 0.1
+                axs[i, j].set_ylim(y_min - margem, y_max + margem)
+    
+    # Verifica se a pasta existe; se não, cria automaticamente
+    diretorio_saida = "resultados"
+    if not os.path.exists(diretorio_saida):
+        os.makedirs(diretorio_saida)
+        print(f"Pasta '{diretorio_saida}' criada com sucesso!")
+
+    # Nome do arquivo (substitui se já existir)
+    nome_arquivo = f"{prefixo}_32plots_{sufixo_nome.replace(' ', '_').replace('ú', 'u').replace('ê', 'e').replace('ç', 'c').replace('õ', 'o').replace('ã', 'a')}.png"
+    caminho_completo = os.path.join(diretorio_saida, nome_arquivo)
+
+    # Salva com alta qualidade e sem margens extras
+    plt.savefig(caminho_completo, dpi=600, bbox_inches='tight')
+    print(f"Figura salva em: {caminho_completo}")
+
+    plt.close(fig) # Fecha a figura 
+
+def atv1_1():
     dados_completos_euler = {l: {"t": [], "res": [], "ax": [], "ay": [], "p": [], "e": []} for l in l0}
     dados_completos_rk4 = {l: {"t": [], "res": [], "ax": [], "ay": [], "p": [], "e": []} for l in l0}
 
@@ -354,6 +485,11 @@ def main():
     salvar_grafico_16_subplots(dados_completos_euler, h, l0, "Múltiplas Configurações L0", prefixo="Euler")
     # --- RK4 ---
     salvar_grafico_16_subplots(dados_completos_rk4, h, l0, "Múltiplas Configurações L0", prefixo="RK4")
+    
+    salvar_grafico_32_subplots(dados_completos_euler, dados_completos_rk4, h, l0, "Comparação Completa Euler vs RK4", prefixo="Comparacao")
+
+def main():
+    atv1_1()
 
 if __name__ == "__main__":
     main()
