@@ -51,6 +51,7 @@ def euler(passo, t_simul, condicao_inicial, l0=l0[0]):
 
     for i in range(0, n_passos - 1):
         f = derivadas(resultados[i], t[i], l0)
+
         # --- TRAVA DE SEGURANÇA ---
         # Se qualquer derivada ou valor de estado ficar absurdo, paramos tudo
         if np.any(np.abs(f) > 1e100) or np.any(np.abs(resultados[i]) > 1e100):
@@ -60,6 +61,7 @@ def euler(passo, t_simul, condicao_inicial, l0=l0[0]):
             didt[i:] = np.nan
             resultados[i+1:] = np.nan
             break # Sai do loop imediatamente
+
         ax[i] = f[1]   # aceleração em x
         ay[i] = f[3]   # aceleração em y
         didt[i] = f[4] # variação da corrente
@@ -81,9 +83,9 @@ def salvar_grafico_8_subplots(t_lista, dados_lista, accel_x_lista,
     plt.subplots_adjust(hspace=0.5)
 
     # Nomes para os labels dos subplots
-    labels = ['$y(t)$', '$\dot{y}(t)$', '$\ddot{y}(t)$', 
-            '$x(t)$', '$\dot{x}(t)$', '$\ddot{x}(t)$', 
-            '$I(t)$', '$P(t)$']
+    labels = ['$y(t) [m]$', '$\dot{y}(t) [m/s]$', '$\ddot{y}(t) [m/s^2]$', 
+            '$x(t) [m]$', '$\dot{x}(t) [m/s]$', '$\ddot{x}(t) [m/s^2]$', 
+            '$I(t) [A]$', '$P(t) [W]$']
     
     # Plotando cada h fornecido na lista
     for i, h in enumerate(h_lista):
@@ -152,6 +154,100 @@ def salvar_grafico_8_subplots(t_lista, dados_lista, accel_x_lista,
 
     plt.close(fig) # Fecha a figura 
 
+def salvar_grafico_16_subplots(dados_completos, h_lista, 
+                              l0_val, sufixo_nome, prefixo="Euler"):
+    """
+    Gera uma imagem de 16 subplots (2 colunas) para um L0 específico.
+    Pode conter múltiplas curvas (uma para cada h).
+    """
+
+    # --- Preparação do Plot ---
+    fig, axs = plt.subplots(8, 2, figsize=(16, 22), sharex=True)
+    fig.suptitle('Simulação de Coletor de Energia MEMS Biestável\n' + 
+                f'Método de {prefixo} \n{sufixo_nome}', 
+                fontsize=14, fontweight='bold', y=0.95)
+    plt.subplots_adjust(hspace=0.5)
+
+    # Nomes para os labels dos subplots
+    labels = ['$y(t) [m]$', '$\dot{y}(t) [m/s]$', '$\ddot{y}(t) [m/s^2]$', 
+            '$x(t) [m]$', '$\dot{x}(t) [m/s]$', '$\ddot{x}(t) [m/s^2]$', 
+            '$I(t) [A]$', '$P(t) [W]$']
+    
+    for col, val_l0 in enumerate(l0_val):
+        # Adiciona um "Subtítulo" para cada coluna
+        d_l0 = dados_completos[val_l0]
+        axs[0, col].set_title(f'Configuração: $l_0$ = {val_l0}m', 
+                          fontsize=14, pad=20, fontweight='semibold')
+        # Plotando cada h fornecido na lista
+        for i, h in enumerate(h_lista):
+            # Captura a energia correspondente a este h
+            t = d_l0["t"][i]
+            res = d_l0["res"][i]
+            e_atual = d_l0["e"][i]
+
+            # Define o texto da legenda para a energia (trata infinito)
+            if np.isnan(e_atual) or np.isinf(e_atual):
+                legenda_energia = f'h={h} (E=$\infty$)'
+            else:
+                legenda_energia = f'h={h} (E={e_atual:.4f} J)'
+
+            axs[0, col].plot(t, res[:,2] , label=f'h={h}')            # y
+            axs[1, col].plot(t, res[:,3])                             # vy
+            axs[2, col].plot(t, d_l0["ay"][i])                        # ay
+            axs[3, col].plot(t, res[:,0])                             # x
+            axs[4, col].plot(t, res[:,1])                             # vx
+            axs[5, col].plot(t, d_l0["ax"][i])                        # ax
+            axs[6, col].plot(t, res[:,4])                             # I
+            axs[7, col].plot(t, d_l0["p"][i], label=legenda_energia)  # P
+        axs[0, col].legend(loc='upper right')
+        axs[7, col].legend(loc='upper right')
+        axs[7, col].set_xlabel('Tempo (s)')
+
+    # --- Ajustes de Eixo e Escala ---
+    idx_melhor = -1
+    for i in range(8):
+        for j in range(2):
+            if j==0:
+                axs[i, 0].set_ylabel(labels[i])
+            axs[i, j].grid(True, alpha=0.3)
+            axs[i, j].set_xlim(0, 20)
+
+            # Fixar escala baseada no melhor resultado (se ele não for NaN)
+            # Pegamos os dados do melhor passo para definir os limites
+            melhor_resultado_da_linha = []
+            l0_atual = l0_val[j]
+            d_l0 = dados_completos[l0_atual]
+            if i == 0: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,2]   # y
+            elif i == 1: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,3] # vy
+            elif i == 2: melhor_resultado_da_linha = d_l0["res"][idx_melhor]      # ay
+            elif i == 3: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,0] # x
+            elif i == 4: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,1] # vx
+            elif i == 5: melhor_resultado_da_linha = d_l0["ax"][idx_melhor]       # ax
+            elif i == 6: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,4] # I
+            elif i == 7: melhor_resultado_da_linha = d_l0["p"][idx_melhor]        # P
+
+            # se não for uma lista só de NaNs fixamos a escala
+            if np.any(np.isfinite(melhor_resultado_da_linha)):
+                y_min = np.nanmin(melhor_resultado_da_linha)
+                y_max = np.nanmax(melhor_resultado_da_linha)
+                # margem de 10% para não colar na borda
+                margem = (y_max - y_min) * 0.1 if y_max != y_min else 0.1
+                axs[i, j].set_ylim(y_min - margem, y_max + margem)
+    # Verifica se a pasta existe; se não, cria automaticamente
+    diretorio_saida = "resultados"
+    if not os.path.exists(diretorio_saida):
+        os.makedirs(diretorio_saida)
+        print(f"Pasta '{diretorio_saida}' criada com sucesso!")
+
+    # Nome do arquivo (substitui se já existir)
+    nome_arquivo = f"{prefixo}_16plots_{sufixo_nome.replace(' ', '_').replace('ú', 'u').replace('ê', 'e')}.png"
+    caminho_completo = os.path.join(diretorio_saida, nome_arquivo)
+
+    # Salva com alta qualidade e sem margens extras
+    plt.savefig(caminho_completo, dpi=300, bbox_inches='tight')
+    print(f"Figura salva em: {caminho_completo}")
+
+    plt.close(fig) # Fecha a figura 
 #####################################################################################
 def main():
     dados_completos_euler = {l: {"t": [], "res": [], "ax": [], "ay": [], "p": [], "e": []} for l in l0}
@@ -185,6 +281,6 @@ def main():
         # Gerar imagem de CONVERGÊNCIA (1 L0, 4 passos h juntos)
         d = dados_completos_euler[val_l0]
         salvar_grafico_8_subplots(d["t"], d["res"], d["ax"], d["ay"], d["p"], d["e"], h, val_l0, "Convergência de h")
-
+    salvar_grafico_16_subplots(dados_completos_euler, h, l0, "Convergência de h")
 if __name__ == "__main__":
     main()
