@@ -149,7 +149,7 @@ def salvar_grafico_8_subplots(t_lista, dados_lista, accel_x_lista,
     caminho_completo = os.path.join(diretorio_saida, nome_arquivo)
 
     # Salva com alta qualidade e sem margens extras
-    plt.savefig(caminho_completo, dpi=300, bbox_inches='tight')
+    plt.savefig(caminho_completo, dpi=600, bbox_inches='tight')
     print(f"Figura salva em: {caminho_completo}")
 
     plt.close(fig) # Fecha a figura 
@@ -219,7 +219,7 @@ def salvar_grafico_16_subplots(dados_completos, h_lista,
             d_l0 = dados_completos[l0_atual]
             if i == 0: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,2]   # y
             elif i == 1: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,3] # vy
-            elif i == 2: melhor_resultado_da_linha = d_l0["res"][idx_melhor]      # ay
+            elif i == 2: melhor_resultado_da_linha = d_l0["ay"][idx_melhor]      # ay
             elif i == 3: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,0] # x
             elif i == 4: melhor_resultado_da_linha = d_l0["res"][idx_melhor][:,1] # vx
             elif i == 5: melhor_resultado_da_linha = d_l0["ax"][idx_melhor]       # ax
@@ -240,14 +240,15 @@ def salvar_grafico_16_subplots(dados_completos, h_lista,
         print(f"Pasta '{diretorio_saida}' criada com sucesso!")
 
     # Nome do arquivo (substitui se já existir)
-    nome_arquivo = f"{prefixo}_16plots_{sufixo_nome.replace(' ', '_').replace('ú', 'u').replace('ê', 'e')}.png"
+    nome_arquivo = f"{prefixo}_16plots_{sufixo_nome.replace(' ', '_').replace('ú', 'u').replace('ê', 'e').replace('ç', 'c').replace('õ', 'o')}.png"
     caminho_completo = os.path.join(diretorio_saida, nome_arquivo)
 
     # Salva com alta qualidade e sem margens extras
-    plt.savefig(caminho_completo, dpi=300, bbox_inches='tight')
+    plt.savefig(caminho_completo, dpi=600, bbox_inches='tight')
     print(f"Figura salva em: {caminho_completo}")
 
     plt.close(fig) # Fecha a figura 
+
 #####################################################################################
 def main():
     dados_completos_euler = {l: {"t": [], "res": [], "ax": [], "ay": [], "p": [], "e": []} for l in l0}
@@ -281,6 +282,7 @@ def main():
         # Gerar imagem de CONVERGÊNCIA (1 L0, 4 passos h juntos)
         d = dados_completos_euler[val_l0]
         salvar_grafico_8_subplots(d["t"], d["res"], d["ax"], d["ay"], d["p"], d["e"], h, val_l0, "Convergência de h")
-    salvar_grafico_16_subplots(dados_completos_euler, h, l0, "Convergência de h")
+    salvar_grafico_16_subplots(dados_completos_euler, h, l0, "Múltiplas Configurações L0", prefixo="Euler")
+
 if __name__ == "__main__":
     main()
