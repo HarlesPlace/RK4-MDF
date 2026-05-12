@@ -160,7 +160,7 @@ def make_psi(X, Y, U_inf, theta, mask, gif=False):
 
         # 3. Salvando o arquivo GIF
         if frames:
-            frames[0].save(f'{diretorio_saida}/asa_{90+theta}deg_escoamento_evoluindo.gif',
+            frames[0].save(f'{diretorio_saida}/asa_vel{U_inf}_{90+theta}deg_escoamento_evoluindo.gif',
                     save_all=True, append_images=frames[1:], 
                     optimize=False, duration=100, loop=0)
         print("GIF gerado com sucesso!")
@@ -168,8 +168,7 @@ def make_psi(X, Y, U_inf, theta, mask, gif=False):
         plt.close(fig)        # Fecha a figura usada para o GIF
     return psi
 
-def make_gradientes(psi, mask, dy=dy, dx=dx):
-    pass
+def make_gradientes(psi, mask, U_inf, theta, dy=dy, dx=dx):
     # grad_y é a derivada em relação a y, grad_x em relação a x
     grad_y, grad_x = np.gradient(psi, dy, dx)
 
@@ -183,7 +182,11 @@ def make_gradientes(psi, mask, dy=dy, dx=dx):
     ax.contourf(X, Y, mask, levels=[0.5, 1], colors=['#8B0000'], zorder=3)
 
     # Define o 'passo' das setas (ex: plotar a cada 5 ou 10 pontos)
-    passo = 10
+    distancia_entre_setas = 0.1 
+
+    # O passo (inteiro) será essa distância dividida pelo tamanho do seu pixel
+    # Usamos int() e max(1, ...) para garantir que o passo seja pelo menos 1
+    passo = max(1, int(distancia_entre_setas / dx))
 
     # Criar o campo de vetores
     # X, Y: coordenadas; u_x, u_y: componentes; V_abs: define a cor das setas
@@ -195,15 +198,363 @@ def make_gradientes(psi, mask, dy=dy, dx=dx):
     # Adiciona uma barra de cores para a velocidade
     plt.colorbar(q, label='Velocidade Absoluta [m/s]')
 
-    ax.set_title("Campo de Vetores de Velocidade")
+    ax.set_title(f"Campo de Vetores de Velocidade \n (Ângulo {90+theta}° $U_\infty$ = {U_inf} m/s)")
     ax.axis('equal')
-    plt.show()
+    ax.set_xlabel("Distância X [m]")
+    ax.set_ylabel("Distância Y [m]")
+    ax.axis('equal') # Mantém a proporção real 1:1
+
+    diretorio_saida = "resultados2"
+    if not os.path.exists(diretorio_saida):
+        os.makedirs(diretorio_saida)
+        print(f"Pasta '{diretorio_saida}' criada com sucesso!")
+    # Salva a imagem final em alta resolução (PNG)
+    caminho_imagem = f"{diretorio_saida}/gradientes-vel{U_inf}_{90+theta}deg.png"
+    fig.savefig(caminho_imagem, dpi=600, bbox_inches='tight')
+    print(f"Imagem final salva em: {caminho_imagem}")
+    plt.close(fig)  # Fecha a figura usada para a imagem final
+
+    return u_x, u_y, V_abs
+
+def calc_pressure(u_x, u_y, U_inf, mask, theta):
+    # Constantes
+    rho = 1.0  # Conforme você passou anteriormente
+    P_max_teorico = 0.5 * rho * U_inf**2
+    
+    # 1. Cálculo da Pressão
+    V_quadrado = u_x**2 + u_y**2
+    pressao = 0.5 * rho * (U_inf**2 - V_quadrado)
+
+    # 2. Configuração do Gráfico (Interface orientada a objetos para melhor controle)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    # Mascarar a pressão dentro da asa
+    pressao_plot = np.ma.masked_where(mask, pressao)
+    
+    # Níveis de pressão (focando na física e ignorando as quinas brancas)
+    niveis = np.linspace(-5000, 1.2 * P_max_teorico, 100)
+    
+    # Plotar o mapa de pressões com 'extend' para pintar o que foge da escala
+    cp = ax.contourf(X, Y, pressao_plot, levels=niveis, cmap='jet', extend='both')
+    fig.colorbar(cp, label='Pressão Manométrica [Pa]')
+
+    # Desenhar a asa por cima (zorder alto para acabamento)
+    ax.contourf(X, Y, mask, levels=[0.5, 1], colors=['black'], zorder=3)
+
+    ax.set_title(f"Distribuição de Pressão - Ângulo {90+theta}° $U_\infty$ = {U_inf} m/s)")
+    ax.set_xlabel("Distância X [m]")
+    ax.set_ylabel("Distância Y [m]")
+    ax.axis('equal')
+
+    # 3. Lógica de Salvamento
+    diretorio_saida = "resultados2"
+    if not os.path.exists(diretorio_saida):
+        os.makedirs(diretorio_saida)
+        print(f"Pasta '{diretorio_saida}' criada!")
+
+    nome_arquivo = f"{diretorio_saida}/pressao_asa-vel{U_inf}_{90+theta}deg.png"
+    # dpi=600 garante que as curvas fiquem nítidas no PDF do relatório
+    fig.savefig(nome_arquivo, dpi=600, bbox_inches='tight')
+    print(f"Figura de pressão salva em: {nome_arquivo}")
+
+    
+    # 4. Limpeza de memória
+    plt.close(fig)
+
+    return pressao, np.min(pressao), np.max(pressao)
+
+def calc_forces(pressao, mask, dx, dy, rho, U_inf, theta):
+    """
+    Calcula Sustentação (L) e Arrasto (D) integrando a pressão na superfície.
+    """
+    # 1. Encontrar a 'fronteira' da asa
+    # Usamos um truque de deslocamento de matriz para achar quem é vizinho do sólido
+    is_fluid = ~mask
+    
+    # Vizinhos imediatos (Cima, Baixo, Esquerda, Direita)
+    # Se o ponto é fluido mas tem um vizinho sólido, ele está na superfície
+    borda_inferior = is_fluid & np.roll(mask,  1, axis=0) # Fluido logo abaixo do sólido
+    borda_superior = is_fluid & np.roll(mask, -1, axis=0) # Fluido logo acima do sólido
+    borda_esquerda = is_fluid & np.roll(mask,  1, axis=1) # Fluido à esquerda do sólido
+    borda_direita  = is_fluid & np.roll(mask, -1, axis=1) # Fluido à direita do sólido
+
+    # garantir que as bordas não se sobreponham
+    borda_superior = borda_superior & ~borda_esquerda & ~borda_direita
+    borda_inferior = borda_inferior & ~borda_esquerda & ~borda_direita
+    # 2. Integrar as pressões (Soma de P * area)
+    # Sustentação (L): Pressão de baixo empurra pra cima (+), de cima empurra pra baixo (-)
+    # Multiplicamos por dx pois é a largura de cada 'pixel' da face
+    L = (np.sum(pressao[borda_superior]) - np.sum(pressao[borda_inferior])) * dx
+    
+    # Arrasto (D): Pressão da frente empurra pra trás (+), de trás empurra pra frente (-)
+    # Multiplicamos por dy pois é a altura de cada 'pixel' da face
+    D = (np.sum(pressao[borda_esquerda]) - np.sum(pressao[borda_direita])) * dy
+
+    # 3. Adimensionalizar (Coeficientes)
+    # Corda média (c) pode ser aproximada pela largura média do trapézio ou W2
+    c = H # Corda da asa (m)
+    CL = L / (0.5 * rho * (U_inf**2) * c)
+    CD = D / (0.5 * rho * (U_inf**2) * c)
+    # 4. Configuração do Gráfico de Forças
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Desenha a asa (preto) e o fundo (cinza claro)
+    ax.set_facecolor('#F0F0F0')
+    ax.contourf(X, Y, mask, levels=[0.5, 1], colors=['black'], zorder=1)
+    
+    # Coordenadas do Centro G
+    x_G = (9 * W2) / 2
+    y_G = (2 * H) / 2
+    
+    # Plotagem dos Vetores (Escalonados para visibilidade)
+    # Ajuste o fator_escala se as setas ficarem muito pequenas ou grandes
+    # 1. Definir o tamanho máximo visual da seta (ex: 25% da altura do gráfico)
+    tamanho_max_seta = 0.25 * (2 * H) 
+    
+    # 2. Encontrar a maior força para servir de referência de escala
+    maior_forca = max(abs(L), abs(D))
+    
+    # 3. Calcular o fator de escala dinâmico
+    # O scale do quiver funciona assim: (Valor da Força) / (Escala) = Tamanho no gráfico
+    # Logo, Escala = Maior Força / Tamanho Máximo Desejado
+    escala_dinamica = maior_forca / tamanho_max_seta
+    
+    # Vetor Sustentação (Verde)
+    ax.quiver(x_G, y_G, 0, L, color='green', angles='xy', scale_units='xy', 
+              scale=escala_dinamica, width=0.015, label='Sustentação (L)', zorder=5)
+    
+    # Vetor Arrasto (Vermelho)
+    ax.quiver(x_G, y_G, D, 0, color='red', angles='xy', scale_units='xy', 
+              scale=escala_dinamica, width=0.015, label='Arrasto (D)', zorder=5)
+
+    # 5. Caixa de Texto com os Coeficientes (Estilo 'Legend')
+    texto_stats = (f'L: {L:.2f} N\n'
+                   f'D: {D:.2f} N\n'
+                   f'CL: {CL:.4f}\n'
+                   f'CD: {CD:.4f}')
+    
+    # Posiciona a caixa no canto superior esquerdo
+    props = dict(boxstyle='round', facecolor='white', alpha=0.8)
+    ax.text(0.05, 0.95, texto_stats, transform=ax.transAxes, fontsize=12,
+            verticalalignment='top', bbox=props, family='monospace')
+
+    # Detalhes de formatação
+    ax.set_title(f"Diagrama de Forças Aerodinâmicas - $\\theta = {90+theta}^\\circ$ $U_\infty$ = {U_inf} m/s)")
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+    ax.axis('equal')
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.legend(loc='lower right')
+
+    # 6. Lógica de Salvamento
+    diretorio_saida = "resultados2"
+    if not os.path.exists(diretorio_saida):
+        os.makedirs(diretorio_saida)
+    
+    nome_figura = f"{diretorio_saida}/forcas_asa-vel{U_inf}_{90+theta}deg.png"
+    fig.savefig(nome_figura, dpi=600, bbox_inches='tight')
+    print(f"Gráfico de forças salvo: {nome_figura}")
+    
+    plt.close(fig)
+
+    return L, D, CL, CD
+
+# def calc_forces2(pressao, mask, dx, dy, rho, U_inf, theta):
+#     surface = np.zeros_like(mask, dtype=bool)
+
+#     for i in range(1, mask.shape[0]-1):
+#         for j in range(1, mask.shape[1]-1):
+
+#             if mask[i,j]:
+
+#                 vizinhos = [
+#                     mask[i+1,j],
+#                     mask[i-1,j],
+#                     mask[i,j+1],
+#                     mask[i,j-1]
+#                 ]
+
+#                 if not all(vizinhos):
+#                     surface[i,j] = True
+#     ny, nx = np.gradient(mask.astype(float), dy, dx)
+#     norma = np.sqrt(nx**2 + ny**2) + 1e-12
+
+#     nx /= norma
+#     ny /= norma
+#     Fx = 0.0
+#     Fy = 0.0
+
+#     for i,j in np.argwhere(surface):
+
+#         p = pressao[i,j]
+
+#         dS = np.sqrt(dx**2 + dy**2)
+
+#         Fx += -p * nx[i,j] * dS
+#         Fy += -p * ny[i,j] * dS
+    
+#     D = Fx
+#     L = Fy  
+#     c = H # Corda da asa (m)
+#     CL = L / (0.5 * rho * (U_inf**2) * c)
+#     CD = D / (0.5 * rho * (U_inf**2) * c)
+#     # 4. Configuração do Gráfico de Forças
+#     fig, ax = plt.subplots(figsize=(10, 6))
+    
+#     # Desenha a asa (preto) e o fundo (cinza claro)
+#     ax.set_facecolor('#F0F0F0')
+#     ax.contourf(X, Y, mask, levels=[0.5, 1], colors=['black'], zorder=1)
+    
+#     # Coordenadas do Centro G
+#     x_G = (9 * W2) / 2
+#     y_G = (2 * H) / 2
+    
+#     # Plotagem dos Vetores (Escalonados para visibilidade)
+#     # Ajuste o fator_escala se as setas ficarem muito pequenas ou grandes
+#     # 1. Definir o tamanho máximo visual da seta (ex: 25% da altura do gráfico)
+#     tamanho_max_seta = 0.25 * (2 * H) 
+    
+#     # 2. Encontrar a maior força para servir de referência de escala
+#     maior_forca = max(abs(L), abs(D))
+    
+#     # 3. Calcular o fator de escala dinâmico
+#     # O scale do quiver funciona assim: (Valor da Força) / (Escala) = Tamanho no gráfico
+#     # Logo, Escala = Maior Força / Tamanho Máximo Desejado
+#     escala_dinamica = maior_forca / tamanho_max_seta
+    
+#     # Vetor Sustentação (Verde)
+#     ax.quiver(x_G, y_G, 0, L, color='green', angles='xy', scale_units='xy', 
+#               scale=escala_dinamica, width=0.015, label='Sustentação (L)', zorder=5)
+    
+#     # Vetor Arrasto (Vermelho)
+#     ax.quiver(x_G, y_G, D, 0, color='red', angles='xy', scale_units='xy', 
+#               scale=escala_dinamica, width=0.015, label='Arrasto (D)', zorder=5)
+
+#     # 5. Caixa de Texto com os Coeficientes (Estilo 'Legend')
+#     texto_stats = (f'L: {L:.2f} N\n'
+#                    f'D: {D:.2f} N\n'
+#                    f'CL: {CL:.4f}\n'
+#                    f'CD: {CD:.4f}')
+    
+#     # Posiciona a caixa no canto superior esquerdo
+#     props = dict(boxstyle='round', facecolor='white', alpha=0.8)
+#     ax.text(0.05, 0.95, texto_stats, transform=ax.transAxes, fontsize=12,
+#             verticalalignment='top', bbox=props, family='monospace')
+
+#     # Detalhes de formatação
+#     ax.set_title(f"Diagrama de Forças Aerodinâmicas - $\\theta = {90+theta}^\\circ$ $U_\infty$ = {U_inf} m/s)")
+#     ax.set_xlabel("X [m]")
+#     ax.set_ylabel("Y [m]")
+#     ax.axis('equal')
+#     ax.grid(True, linestyle='--', alpha=0.5)
+#     ax.legend(loc='lower right')
+
+#     # 6. Lógica de Salvamento
+#     diretorio_saida = "resultados2"
+#     if not os.path.exists(diretorio_saida):
+#         os.makedirs(diretorio_saida)
+    
+#     nome_figura = f"{diretorio_saida}/forcas_asa-vel{U_inf}_{90+theta}deg.png"
+#     fig.savefig(nome_figura, dpi=600, bbox_inches='tight')
+#     print(f"Gráfico de forças salvo: {nome_figura}")
+    
+#     plt.close(fig)
+
+#     return L, D, CL, CD
+def plot_comparativo_pressao(dados_dict):
+    """
+    Gera uma figura comparando a pressão dos dois casos (90° e 15°).
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    for ax, (label, data) in zip(axes, dados_dict.items()):
+        p = data['p']
+        m = data['mask']
+        p_min = data['min']
+        
+        # Mascarar para o plot
+        p_plot = np.ma.masked_where(m, p)
+        
+        # Plot de contorno
+        niveis = np.linspace(-5000, 600, 100)
+        cp = ax.contourf(X, Y, p_plot, levels=niveis, cmap='jet', extend='both')
+        
+        # Destacar o Aerofólio
+        ax.contourf(X, Y, m, levels=[0.5, 1], colors=['black'])
+        
+        # Texto explicitando o valor mínimo (conforme pedido no item a)
+        ax.text(0.05, 0.05, f"P_min: {p_min:.2f} Pa", transform=ax.transAxes, 
+                bbox=dict(facecolor='white', alpha=0.8), color='blue', fontweight='bold')
+        
+        ax.set_title(f"Pressão: {label}")
+        ax.axis('equal')
+        fig.colorbar(cp, ax=ax, label='Pressão [Pa]')
+
+    plt.tight_layout()
+    
+    # Salvamento
+    caminho = "resultados2/comparativo_pressao_conjunto.png"
+    plt.savefig(caminho, dpi=600)
+    print(f"Gráfico comparativo salvo em: {caminho}")
+    plt.close(fig)
 
 def main():
-    theta = 0
-    mask = make_mask(X, Y, max_domain_width / 2, max_domain_height / 2, H, W1, W2, theta=theta)
-    psi = make_psi(X, Y, U_inf, theta, mask, gif=True)
-    make_gradientes(psi, mask, dy, dx)
+    def ex1():
+        
+        velocidades = [10, 30, 90]
+        thetas = [0, -75]
+        for v_inf in velocidades:
+            for theta in thetas:
+                mask = make_mask(X, Y, max_domain_width / 2, max_domain_height / 2, H, W1, W2, theta=theta)
+                psi = make_psi(X, Y, v_inf, theta, mask, gif=True)
+                u_x, u_y, V_abs = make_gradientes(psi, mask, v_inf, theta, dy, dx)
+                pressao, min_pressao, max_pressao = calc_pressure(u_x, u_y, v_inf, mask, theta)
+                calc_forces(pressao, mask, dx, dy, rho, v_inf, theta)
+    def ex2():
+        # Parâmetros de entrada
+        angulos_ajuste = [0, -75]  # Referencial do seu código (0=Vertical, -75=15°)
+        velocidades = [10, 30, 90] # Adicionando as variações do item (b)
+        
+        # Dicionário para armazenar pressões para o plot conjunto (item a)
+        # Guardaremos apenas para a velocidade padrão de 30 m/s para comparar os casos
+        pressões_comparativo = {}
+
+        for v_inf in velocidades:
+            print(f"\n--- Iniciando simulações para U_inf = {v_inf} m/s ---")
+            
+            for theta in angulos_ajuste:
+                print(f"Processando ângulo: {90+theta}°...")
+                
+                # 1. Gerar Máscara
+                mask = make_mask(X, Y, max_domain_width / 2, max_domain_height / 2, H, W1, W2, theta=theta)
+                
+                # 2. Solver (PSI)
+                psi = make_psi(X, Y, v_inf, theta, mask, gif=False) # Gera GIF só na velocidade base
+                
+                # 3. Gradientes e Velocidades
+                u_x, u_y, V_abs = make_gradientes(psi, mask, v_inf, theta, dy, dx)
+                
+                # 4. Cálculo de Pressão
+                # Ajuste sua calc_pressure para retornar também min_p e max_p
+                pressao, min_p, max_p = calc_pressure(u_x, u_y, v_inf, mask, theta)
+                
+                # Guardar dados para o plot conjunto do item (a) se for a velocidade de 30m/s
+                if v_inf == 30:
+                    nome_caso = "Placa Vertical" if theta == 0 else "Aerofólio 15°"
+                    pressões_comparativo[nome_caso] = {
+                        'p': pressao, 
+                        'min': min_p,
+                        'mask': mask
+                    }
+                
+                # 5. Cálculo e Plot de Forças (item b)
+                calc_forces(pressao, mask, dx, dy, rho, U_inf, theta)
+
+        # 6. Após todos os loops, gerar o gráfico comparativo (item a)
+        plot_comparativo_pressao(pressões_comparativo)
+    
+    ex2()
+    ex1()
 
 if __name__ == "__main__":
     main()
